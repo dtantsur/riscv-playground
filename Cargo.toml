@@ -7,7 +7,9 @@ license = "Apache-2.0/MIT"
 readme = "README.md"
 
 [dependencies]
+bme280 = { git = "https://github.com/dtantsur/bme280-rs", branch = "borrow_delay" }
 embedded-hal = "0.2.3"
+heapless = "0.6.0"
 hifive1 = { version = "0.9.0", features = ["board-hifive1-revb"] }
 panic-halt = "0.2.0"
 riscv = "0.6.0"

@@ -134,19 +134,20 @@ impl Board {
 fn main() -> ! {
     let mut board = Board::new();
     let mut display = board.i2c.display();
+    let mut temp = board.i2c.temperature_sensor(&mut board.sleep);
 
     display.write_str("Hello world").unwrap();
 
-    // let mut lines: [String<heapless::consts::U32>; 2] = [String::new(), String::new()];
+    let mut lines: [String<heapless::consts::U32>; 2] = [String::new(), String::new()];
 
     let mut index = 1;
     loop {
-        // if let Ok(msr) = temp.measure(&mut board.sleep) {
-        //     lines.iter_mut().for_each(String::clear);
-        //     write!(lines[0], "t {:.1}, h {:.1}%", msr.temperature, msr.humidity).unwrap();
-        //     display.clear().unwrap();
-        //     display.write_str(lines[0].as_str()).unwrap();
-        // }
+        if let Ok(msr) = temp.measure(&mut board.sleep) {
+            lines.iter_mut().for_each(String::clear);
+            write!(lines[0], "t {:.1}, h {:.1}%", msr.temperature, msr.humidity).unwrap();
+            display.clear().unwrap();
+            display.write_str(lines[0].as_str()).unwrap();
+        }
 
         if index % 2 == 1 {
             board

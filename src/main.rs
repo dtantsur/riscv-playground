@@ -1,14 +1,16 @@
 #![no_std]
 #![no_main]
+#![allow(non_snake_case)]
 
 extern crate panic_halt;
 
 use bme280::BME280;
+use embedded_ccs811::{prelude::*, Ccs811Awake};
 use embedded_hal::blocking::delay::DelayMs;
 use heapless::String;
 use hifive1::hal::{
     delay::Sleep, e310x::I2C0, gpio::gpio0::Pin12, gpio::gpio0::Pin13, gpio::NoInvert,
-    gpio::Output, gpio::Regular, gpio::IOF0, i2c::I2c, i2c::Speed, DeviceResources,
+    gpio::Output, gpio::Regular, gpio::IOF0, i2c::I2c, i2c::Speed, time::Bps, DeviceResources,
 };
 use hifive1::hal::{gpio::gpio0::Pin11, prelude::*};
 use hifive1::{self, pin, Led};
@@ -75,6 +77,22 @@ impl I2cBus {
         result.unwrap();
         bme
     }
+
+    fn gas_sensor<D: DelayMs<u8>>(
+        &self,
+        delay: &mut D,
+    ) -> Ccs811Awake<I2cProxy, embedded_ccs811::mode::App> {
+        let mut ccs811 =
+            Ccs811Awake::new(self.0.acquire_i2c(), embedded_ccs811::SlaveAddr::default());
+        ccs811.software_reset().unwrap();
+
+        delay.delay_ms(10u8);
+
+        let mut app = ccs811.start_application().ok().unwrap();
+        app.set_mode(embedded_ccs811::MeasurementMode::ConstantPower1s)
+            .unwrap();
+        app
+    }
 }
 
 // Board
@@ -113,7 +131,7 @@ impl Board {
             p.I2C0,
             sda,
             scl,
-            Speed::Normal,
+            Speed::Custom(Bps(10000)),
             clocks,
         )));
         let out = pin!(pins, dig17).into_output();
@@ -152,8 +170,13 @@ fn main() -> ! {
     let mut temp = board.i2c.temperature_sensor(&mut board.sleep);
     let mut temperature = 0f32;
     let mut humidity = -1f32;
+    let mut eCO2 = 0u16;
+    let mut eTVOC = 0u16;
 
-    let mut lines: [String<heapless::consts::U32>; 2] = [String::new(), String::new()];
+    let mut gas = board.i2c.gas_sensor(&mut board.sleep);
+
+    let mut lines: [String<heapless::consts::U32>; 4] =
+        [String::new(), String::new(), String::new(), String::new()];
 
     let mut index = 1;
     let mut changed = false;
@@ -171,10 +194,31 @@ fn main() -> ! {
         }
 
         if changed {
+            gas.set_environment(humidity, temperature).unwrap();
+        }
+
+        if let Ok(res) = gas.data() {
+            changed = changed || res.eco2 != eCO2 || res.etvoc != eTVOC;
+            eCO2 = res.eco2;
+            eTVOC = res.etvoc;
+        }
+
+        if changed {
             lines.iter_mut().for_each(String::clear);
             write!(lines[0], "t {:.1} C, h {}%", temperature, humidity as i32).unwrap();
+            if eCO2 > 0 {
+                write!(lines[2], "eCO2 {} PPM", eCO2).unwrap();
+                write!(lines[3], "eTVOC {} PPM", eTVOC).unwrap();
+            } else {
+                write!(lines[2], "No gas readings").unwrap();
+            }
+
             display.clear().unwrap();
-            display.write_str(lines[0].as_str()).unwrap();
+            for (i, line) in lines.iter().enumerate() {
+                display.set_position(0, i as u8).unwrap();
+                display.write_str(line.as_str()).unwrap();
+            }
+            display.flush().unwrap();
             changed = false;
         }
 
@@ -185,7 +229,7 @@ fn main() -> ! {
         } else {
             board.leds.light(false, false, false);
         }
-        board.sleep.delay_ms(1000u32);
+        board.sleep.delay_ms(5000u32);
         index = index % 15 + 1;
     }
 }

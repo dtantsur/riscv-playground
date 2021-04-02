@@ -130,23 +130,52 @@ impl Board {
     }
 }
 
+fn abs(value: f32) -> f32 {
+    if value < 0.0 {
+        -value
+    } else {
+        value
+    }
+}
+
+fn delta(one: f32, two: f32) -> f32 {
+    abs(one - two)
+}
+
 #[entry]
 fn main() -> ! {
     let mut board = Board::new();
     let mut display = board.i2c.display();
-    let mut temp = board.i2c.temperature_sensor(&mut board.sleep);
 
-    display.write_str("Hello world").unwrap();
+    display.write_str("Initializing").unwrap();
+
+    let mut temp = board.i2c.temperature_sensor(&mut board.sleep);
+    let mut temperature = 0f32;
+    let mut humidity = -1f32;
 
     let mut lines: [String<heapless::consts::U32>; 2] = [String::new(), String::new()];
 
     let mut index = 1;
+    let mut changed = false;
+
+    display.write_str("Reading data").unwrap();
+
     loop {
         if let Ok(msr) = temp.measure(&mut board.sleep) {
+            changed =
+                delta(msr.temperature, temperature) > 0.05 || delta(msr.humidity, humidity) > 0.5;
+            if changed {
+                temperature = msr.temperature;
+                humidity = msr.humidity;
+            }
+        }
+
+        if changed {
             lines.iter_mut().for_each(String::clear);
-            write!(lines[0], "t {:.1}, h {:.1}%", msr.temperature, msr.humidity).unwrap();
+            write!(lines[0], "t {:.1} C, h {}%", temperature, humidity as i32).unwrap();
             display.clear().unwrap();
             display.write_str(lines[0].as_str()).unwrap();
+            changed = false;
         }
 
         if index % 2 == 1 {
